@@ -1,0 +1,3 @@
+{"name":"Kavach - Personal Safety Shield","short_name":"Kavach","start_url":"/","display":"standalone",
+"background_color":"#111827","theme_color":"#dc2626",
+"icons":[{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]}

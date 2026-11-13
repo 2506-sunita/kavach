@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kavach – Personal Safety Shield</title><link rel="manifest" href="manifest.json"><meta name="theme-color" content="#b91c1c">
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--tx:#0f172a;--mut:#64748b;--red:#b91c1c;--grn:#15803d;--bd:#e2e8f0}
+@media(prefers-color-scheme:dark){:root{--bg:#0b1220;--card:#131c2e;--tx:#f1f5f9;--mut:#94a3b8;--bd:#25324a}}
+*{box-sizing:border-box}body{margin:0 auto;max-width:480px;padding:16px;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--tx)}
+header{display:flex;align-items:center;gap:10px;margin-bottom:16px}header h1{margin:0;font-size:22px}header p{margin:0;color:var(--mut);font-size:13px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:14px}
+.card h3{margin:0 0 10px;font-size:15px}label{font-size:13px;color:var(--mut)}
+input,textarea{width:100%;padding:12px;margin:6px 0 10px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font:inherit}
+button{padding:12px 16px;border:0;border-radius:10px;background:var(--red);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button.alt{background:var(--mut)}button.ok{background:var(--grn)}button.sm{padding:6px 12px;font-size:13px}
+#sos{width:210px;height:210px;border-radius:50%;font-size:42px;letter-spacing:2px;display:block;margin:12px auto 6px;box-shadow:0 0 0 10px #b91c1c26,0 8px 24px #b91c1c55}
+.cap{text-align:center;color:var(--mut);font-size:13px;margin:0 0 16px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0}
+#ov{position:fixed;inset:0;background:#000e;color:#fff;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:9;text-align:center;padding:20px}
+#cnt{font-size:96px;font-weight:700}a.btn{display:block;padding:13px;margin:8px 0;border-radius:10px;background:var(--grn);color:#fff;text-align:center;text-decoration:none;font-weight:600}
+a.call{background:var(--red);font-size:20px;padding:20px}.hide{display:none}small{color:var(--mut)}
+ul.chk{list-style:none;padding:0;margin:0 0 8px}ul.chk li{padding:5px 0;font-size:14px}
+</style></head><body>
+<header><span style="font-size:34px">🛡️</span><div><h1>Kavach</h1><p>Personal Safety Shield</p></div></header>
+
+<div id="login" class="card">
+  <h3>Sign in</h3>
+  <label>Full name</label><input id="name" placeholder="e.g. Ananya Sharma" autocomplete="name">
+  <label>Mobile number</label><input id="phone" placeholder="+91XXXXXXXXXX" inputmode="tel" autocomplete="tel">
+  <button onclick="sendOtp()">Send verification code</button>
+  <div id="otpbox" class="hide"><label>Verification code</label><input id="otp" placeholder="6-digit code" inputmode="numeric"><button onclick="verify()">Verify &amp; continue</button></div>
+  <p><small id="lmsg"></small></p>
+</div>
+
+<div id="app" class="hide">
+  <button id="sos" onclick="startSOS('button')">SOS</button>
+  <p class="cap">Tap to send an emergency alert. A 5-second countdown lets you cancel.</p>
+
+  <div id="result" class="card hide"></div>
+
+  <div class="card"><div class="row"><div><b>Voice trigger</b><br><small>Say “Kavach Alert” to start an SOS</small></div><button class="sm" id="vbtn" onclick="toggleVoice()">Enable</button></div>
+    <small id="vstat">Voice trigger is off. Keep the app open on screen while it is enabled.</small></div>
+
+  <div class="card"><h3>Emergency message</h3>
+    <textarea id="msg" rows="2" maxlength="200" oninput="localStorage.kv_msg=this.value"></textarea>
+    <small>Sent with every alert, together with your location, a live tracking link and a short voice note.</small></div>
+
+  <div class="card"><h3>Trusted contacts</h3><div id="clist"></div>
+    <input id="cn" placeholder="Contact name"><input id="cp" placeholder="+91XXXXXXXXXX" inputmode="tel">
+    <label><input type="checkbox" id="ce" style="width:auto;margin:0 6px 0 0"> Primary emergency call contact</label><br><br>
+    <button onclick="addContact()">Add contact</button></div>
+  <button class="alt" onclick="logout()">Sign out</button>
+</div>
+
+<div id="ov"><div style="font-size:18px">Sending emergency alert in</div><div id="cnt">5</div>
+  <a id="ovcall" class="btn call">📞 Call emergency contact now</a>
+  <button class="alt" onclick="cancelSOS()">Cancel – false alarm</button></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let token=localStorage.kv_token||"",alertId=null,timer=null,watch=null,rec=null,voiceOn=false,recorder=null,lastGeoErr="";
+$("msg").value=localStorage.kv_msg||"I need help. Please contact me immediately.";
+const api=async(p,m="GET",b)=>{const r=await fetch("/api"+p,{method:m,headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:b?JSON.stringify(b):undefined});
+  const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.detail||"Request failed");return d};
+function show(){$("login").classList.toggle("hide",!!token);$("app").classList.toggle("hide",!token);if(token)loadContacts()}
+async function sendOtp(){try{const d=await api("/auth/send-otp","POST",{phone:$("phone").value.trim()});$("otpbox").classList.remove("hide");
+  $("lmsg").textContent=d.debug_otp?"Demo mode – your code is "+d.debug_otp:"Verification code sent by SMS."}catch(e){$("lmsg").textContent=e.message}}
+async function verify(){try{const d=await api("/auth/verify","POST",{phone:$("phone").value.trim(),otp:$("otp").value.trim(),name:$("name").value});
+  token=d.token;localStorage.kv_token=token;show()}catch(e){$("lmsg").textContent=e.message}}
+function logout(){localStorage.removeItem("kv_token");token="";show()}
+async function loadContacts(){try{const l=await api("/contacts");window.emerg=(l.find(c=>c.is_emergency)||l[0]||{}).phone||"";
+  $("clist").innerHTML=l.map(c=>`<div class="row"><span>${c.is_emergency?"📞 ":""}${esc(c.name)} <small>${esc(c.phone)}</small></span><button class="sm alt" onclick="delC(${c.id})">Remove</button></div>`).join("")||"<small>No contacts added yet.</small>"}catch(e){logout()}}
+async function addContact(){if(!$("cn").value||!$("cp").value)return;await api("/contacts","POST",{name:$("cn").value,phone:$("cp").value.trim(),is_emergency:$("ce").checked});$("cn").value=$("cp").value="";$("ce").checked=false;loadContacts()}
+async function delC(id){await api("/contacts/"+id,"DELETE");loadContacts()}
+
+function startSOS(trigger){if($("ov").style.display==="flex")return;let n=5;$("cnt").textContent=n;
+  $("ovcall").style.display=window.emerg?"block":"none";$("ovcall").href="tel:"+(window.emerg||"");$("ov").style.display="flex";
+  timer=setInterval(()=>{n--;$("cnt").textContent=n;if(n<=0){clearInterval(timer);$("ov").style.display="none";sendSOS(trigger)}},1000)}
+function cancelSOS(){clearInterval(timer);$("ov").style.display="none"}
+const getPos=()=>new Promise(r=>{
+  if(!navigator.geolocation){lastGeoErr="GPS not supported";return r(null)}
+  const ok=p=>r(p.coords);
+  navigator.geolocation.getCurrentPosition(ok,e=>{
+    lastGeoErr=e.code===1?"location permission denied":e.code===2?"no GPS signal":"request timed out";
+    if(e.code===1)return r(null);
+    navigator.geolocation.getCurrentPosition(ok,()=>r(null),{enableHighAccuracy:false,timeout:15000,maximumAge:60000});
+  },{enableHighAccuracy:true,timeout:10000,maximumAge:30000})});
+
+async function sendSOS(trigger){
+  stopVoice();const p=await getPos();let d;
+  try{d=await api("/sos","POST",{lat:p?p.latitude:null,lng:p?p.longitude:null,trigger,message:$("msg").value})}catch(e){return alert("Alert failed: "+e.message)}
+  alertId=d.alert_id;
+  const wa=d.contacts.map(c=>`<a class="btn" target="_blank" href="https://wa.me/${c.phone.replace(/\D/g,"")}?text=${encodeURIComponent(d.message)}">Send via WhatsApp – ${esc(c.name)}</a>`).join("");
+  $("result").innerHTML=`<h3 style="color:var(--red)">🚨 Emergency alert active</h3>
+    <ul class="chk"><li>✅ Alert sent to ${d.contacts.length} contact(s)</li>
+    <li>${p?"✅ Live location shared":"⚠️ Location unavailable ("+lastGeoErr+")"}</li><li>✅ Emergency message included</li>
+    <li id="vn">🎙️ Preparing voice note…</li></ul>
+    ${d.call?`<a class="btn call" href="tel:${d.call}">📞 Call emergency contact</a>`:""}${wa}
+    <a class="btn" style="background:#334155" target="_blank" href="${d.track_url}">Open live tracking page</a>
+    <button class="ok" onclick="safe()">I am safe – end alert</button>`;
+  $("result").classList.remove("hide");window.scrollTo({top:0,behavior:"smooth"});
+  if(navigator.vibrate)navigator.vibrate([300,150,300]);
+  if(navigator.geolocation)watch=setInterval(async()=>{const q=await getPos();if(q&&alertId)api(`/sos/${alertId}/location`,"POST",{lat:q.latitude,lng:q.longitude}).catch(()=>{})},15000);
+  recordVoice(alertId)}
+async function recordVoice(id){
+  try{const st=await navigator.mediaDevices.getUserMedia({audio:true});const mr=new MediaRecorder(st),ch=[];recorder=mr;
+    mr.ondataavailable=e=>ch.push(e.data);
+    mr.onstop=async()=>{st.getTracks().forEach(t=>t.stop());$("vn")&&($("vn").textContent="⏳ Uploading voice note…");
+      try{await fetch(`/api/sos/${id}/voice`,{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":mr.mimeType||"audio/webm"},body:new Blob(ch,{type:mr.mimeType})});
+        $("vn")&&($("vn").textContent="✅ Voice note sent")}catch(e){$("vn")&&($("vn").textContent="⚠️ Voice note upload failed")}};
+    mr.start();$("vn").innerHTML='🎙️ Recording voice note… <button class="sm" onclick="recorder.stop()">Stop &amp; send</button>';
+    setTimeout(()=>mr.state==="recording"&&mr.stop(),15000)
+  }catch(e){$("vn")&&($("vn").textContent="⚠️ Voice note skipped (microphone unavailable)")}}
+async function safe(){clearInterval(watch);if(recorder&&recorder.state==="recording")recorder.stop();
+  if(alertId)await api(`/sos/${alertId}/resolve`,"POST");alertId=null;$("result").classList.add("hide")}
+
+function stopVoice(){voiceOn=false;$("vbtn").textContent="Enable";if(rec)try{rec.stop()}catch(e){}}
+function toggleVoice(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR)return alert("Voice trigger is not supported in this browser. Please use Chrome.");
+  if(voiceOn){stopVoice();$("vstat").textContent="Voice trigger is off.";return}
+  voiceOn=true;$("vbtn").textContent="Disable";
+  rec=new SR();rec.continuous=true;rec.interimResults=true;rec.lang="en-IN";
+  rec.onstart=()=>$("vstat").textContent="🎧 Listening… say “Kavach Alert”";
+  rec.onresult=e=>{const t=[...e.results].slice(-2).map(r=>r[0].transcript.toLowerCase()).join(" ");$("vstat").textContent="Heard: "+t;
+    if(/(kavach|kawach|kavac|kavaj|cavach|कवच|कावच)\s*(alert|alart|aalert|अलर्ट|एलर्ट)/.test(t)){rec.stop();startSOS("voice")}};
+  rec.onerror=e=>{$("vstat").textContent="Voice error: "+e.error+(e.error==="not-allowed"?" – please allow microphone access":"");if(e.error==="not-allowed")stopVoice()};
+  rec.onend=()=>{if(voiceOn)setTimeout(()=>{try{rec.start()}catch(e){}},400)};
+  try{rec.start()}catch(e){$("vstat").textContent="Could not start: "+e.message}}
+if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js");
+show();
+</script></body></html>
